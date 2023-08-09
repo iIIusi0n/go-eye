@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"image/color"
 	"strconv"
+	"strings"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -18,6 +19,7 @@ import (
 var playerTopShips = binding.BindStringList(
 	&[]string{},
 )
+var currentUser int
 
 var isWorking = false
 
@@ -46,24 +48,24 @@ func HideObjects() {
 	}
 }
 
-func UpdateDetailInfo(detailInfo *widget.Table, newData [][]string) {
+func UpdateDetailInfo(newData [][]string) {
 	HideObjects()
 	objectsToHide = []*canvas.Text{}
 
 	// Reset the table.
-	detailInfo.Length = func() (int, int) {
+	gDetailInfo.Length = func() (int, int) {
 		if len(newData) == 0 {
 			return 0, 0
 		} else {
 			return len(newData), len(newData[0])
 		}
 	}
-	detailInfo.CreateCell = func() fyne.CanvasObject {
+	gDetailInfo.CreateCell = func() fyne.CanvasObject {
 		o := canvas.NewText("template", color.White)
 		objectsToHide = append(objectsToHide, o)
 		return o
 	}
-	detailInfo.UpdateCell = func(i widget.TableCellID, o fyne.CanvasObject) {
+	gDetailInfo.UpdateCell = func(i widget.TableCellID, o fyne.CanvasObject) {
 		o.(*canvas.Text).Text = newData[i.Row][i.Col]
 		o.(*canvas.Text).Alignment = fyne.TextAlignCenter
 		if i.Row == 0 {
@@ -78,13 +80,13 @@ func UpdateDetailInfo(detailInfo *widget.Table, newData [][]string) {
 			}
 		}
 	}
-	detailInfo.SetColumnWidth(0, 100)
-	detailInfo.SetColumnWidth(1, 100)
+	gDetailInfo.SetColumnWidth(0, 100)
+	gDetailInfo.SetColumnWidth(1, 100)
 
 	for i := 0; i < len(newData); i++ {
-		detailInfo.SetRowHeight(i, 30)
+		gDetailInfo.SetRowHeight(i, 30)
 	}
-	detailInfo.Refresh()
+	gDetailInfo.Refresh()
 }
 
 func main() {
@@ -105,18 +107,13 @@ func main() {
 	playerEntry := createPlayerEntry(playerName)
 	searchButton := createSearchButton(playerName)
 	resultList, detailInfo := createResultWidgets()
+	gDetailInfo = detailInfo
 
 	// Create sub-container for player entry, search button, and clipboard watcher switch.
 	subContainer := createInputContainer(playerEntry, searchButton)
 
 	// Create the main container with a horizontal split for result list and detail label.
 	mainContainer := createMainContainer(subContainer, resultList, detailInfo)
-
-	time.AfterFunc(time.Duration(5)*time.Second, func() {
-		UpdateDetailInfo(detailInfo, fakeDetail)
-		time.Sleep(time.Duration(5) * time.Second)
-		UpdateDetailInfo(detailInfo, [][]string{})
-	})
 
 	go InputWidgetWatcher(playerEntry, searchButton)
 
@@ -126,6 +123,8 @@ func main() {
 	w.SetFixedSize(true)
 	w.ShowAndRun()
 }
+
+var gDetailInfo *widget.Table
 
 // createPlayerEntry creates a widget for player name entry and binds it to the provided data binding.
 func createPlayerEntry(playerName binding.String) *widget.Entry {
@@ -140,13 +139,20 @@ func createPlayerEntry(playerName binding.String) *widget.Entry {
 		return nil
 	}
 	playerEntry.SetPlaceHolder("Enter the pilot's name...")
+	playerEntry.OnSubmitted = func(s string) {
+		gSearchButton.OnTapped()
+	}
 	return playerEntry
 }
+
+var gSearchButton *widget.Button
 
 // createSearchButton creates a widget for the search button with the provided callback function.
 func createSearchButton(playerName binding.String) *widget.Button {
 	searchButton := widget.NewButton("Analyze", func() {
 		isWorking = true
+
+		playerTopShips.Set([]string{})
 
 		playerNameString, err := playerName.Get()
 		if err != nil {
@@ -159,6 +165,12 @@ func createSearchButton(playerName binding.String) *widget.Button {
 		if err != nil {
 			isWorking = false
 			fmt.Printf("Error occurred: %v\n", err)
+			return
+		}
+
+		if len(playerID) == 0 {
+			isWorking = false
+			fmt.Printf("Error occurred: %v\n", fmt.Errorf("no character found"))
 			return
 		}
 
@@ -182,8 +194,13 @@ func createSearchButton(playerName binding.String) *widget.Button {
 			fmt.Printf("Error occurred: %v\n", err)
 			return
 		}
+
+		currentUser = playerID[0]
+
 		isWorking = false
 	})
+
+	gSearchButton = searchButton
 	return searchButton
 }
 
@@ -198,6 +215,141 @@ func createResultWidgets() (*widget.List, *widget.Table) {
 			item.(*widget.Label).Bind(i.(binding.String))
 		},
 	)
+	resultList.OnSelected = func(id int) {
+		isWorking = true
+
+		shipSelected, err := playerTopShips.Get()
+		if err != nil {
+			isWorking = false
+			fmt.Printf("Error occurred: %v\n", err)
+			return
+		}
+
+		shipID, err := ResolveItemNamesToIDs([]string{shipSelected[id]})
+		if err != nil {
+			isWorking = false
+			fmt.Printf("Error occurred: %v\n", err)
+			return
+		}
+
+		kms, err := GetRecentLosses(currentUser, shipID[0])
+		if err != nil {
+			isWorking = false
+			fmt.Printf("Error occurred: %v\n", err)
+			return
+		}
+
+		newData := [][]string{
+			{"Date", "Prop", "Scram", "Point", "Web", "Neut", "Damp"},
+		}
+		for _, km := range kms {
+			items, t, err := GetItemsFromKillmail(km.KillmailID, km.ZKB.Hash)
+			if err != nil {
+				fmt.Printf("Error occurred: %v\n", err)
+				continue
+			}
+
+			var prop, scram, point, web, neut, damp int
+
+			itemsInString, err := ResolveIdsToNames(items)
+			if err != nil {
+				fmt.Printf("Error occurred: %v\n", err)
+				continue
+			}
+
+			var date string
+			if time.Now().Sub(t).Hours() < 24*31 {
+				date = fmt.Sprintf("%v days ago", int(time.Now().Sub(t).Hours()/24))
+			} else {
+				date = fmt.Sprintf("%v", t.Format("2006-01-02"))
+			}
+
+			for _, item := range itemsInString {
+				item = strings.ToLower(item)
+				if strings.Contains(item, "1mn") {
+					prop = 1
+				} else if strings.Contains(item, "5mn") {
+					prop = 5
+				} else if strings.Contains(item, "10mn") {
+					prop = 10
+				} else if strings.Contains(item, "50mn") {
+					prop = 50
+				} else if strings.Contains(item, "100mn") {
+					prop = 100
+				} else if strings.Contains(item, "500mn") {
+					prop = 500
+				}
+
+				if strings.Contains(item, "warp scrambler") {
+					scram += 1
+				}
+
+				if strings.Contains(item, "warp disruptor") {
+					point += 1
+				}
+
+				if strings.Contains(item, "stasis web") {
+					web += 1
+				}
+
+				if strings.Contains(item, "energy neutralizer") {
+					neut += 1
+				}
+
+				if strings.Contains(item, "sensor dampener") {
+					damp += 1
+				}
+			}
+
+			line := []string{
+				date,
+			}
+			if prop > 0 {
+				if prop == 1 || prop == 10 || prop == 100 {
+					line = append(line, fmt.Sprintf("%vMN AB", prop))
+				} else {
+					line = append(line, fmt.Sprintf("%vMN MWD", prop))
+				}
+			} else {
+				line = append(line, "X")
+			}
+
+			if scram > 0 {
+				line = append(line, "O")
+			} else {
+				line = append(line, "X")
+			}
+
+			if point > 0 {
+				line = append(line, "O")
+			} else {
+				line = append(line, "X")
+			}
+
+			if web > 0 {
+				line = append(line, strconv.Itoa(web))
+			} else {
+				line = append(line, "X")
+			}
+
+			if neut > 0 {
+				line = append(line, "O")
+			} else {
+				line = append(line, "X")
+			}
+
+			if damp > 0 {
+				line = append(line, "O")
+			} else {
+				line = append(line, "X")
+			}
+
+			newData = append(newData, line)
+		}
+
+		UpdateDetailInfo(newData)
+		isWorking = false
+	}
 
 	detailInfo := widget.NewTable(
 		func() (int, int) {

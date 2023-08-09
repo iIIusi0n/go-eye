@@ -47,8 +47,8 @@ func GetRecentLosses(characterID int, shipID int) ([]Killmail, error) {
 	killmailCache[key] = killmails
 	killmailCached[key] = true
 
-	if len(killmails) > 10 {
-		return killmails[:10], nil
+	if len(killmails) > 8 {
+		return killmails[:8], nil
 	} else {
 		return killmails, nil
 	}
