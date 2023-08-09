@@ -40,7 +40,7 @@ func InputWidgetWatcher(entry *widget.Entry, button *widget.Button) {
 	}
 }
 
-var objectsToHide = []*canvas.Text{}
+var objectsToHide []*canvas.Text
 
 func HideObjects() {
 	for _, o := range objectsToHide {
@@ -48,45 +48,48 @@ func HideObjects() {
 	}
 }
 
-func UpdateDetailInfo(newData [][]string) {
-	HideObjects()
+func UpdateDetailInfo(newData [][]string, w fyne.Window, subContainer *fyne.Container, list *widget.List) {
+	// HideObjects()
 	objectsToHide = []*canvas.Text{}
 
-	// Reset the table.
-	gDetailInfo.Length = func() (int, int) {
-		if len(newData) == 0 {
-			return 0, 0
-		} else {
-			return len(newData), len(newData[0])
-		}
-	}
-	gDetailInfo.CreateCell = func() fyne.CanvasObject {
-		o := canvas.NewText("template", color.White)
-		objectsToHide = append(objectsToHide, o)
-		return o
-	}
-	gDetailInfo.UpdateCell = func(i widget.TableCellID, o fyne.CanvasObject) {
-		o.(*canvas.Text).Text = newData[i.Row][i.Col]
-		o.(*canvas.Text).Alignment = fyne.TextAlignCenter
-		if i.Row == 0 {
-			o.(*canvas.Text).TextStyle = fyne.TextStyle{Bold: true}
-		} else {
-			if newData[i.Row][i.Col] == "O" {
-				o.(*canvas.Text).Color = color.RGBA{R: 255, G: 0, B: 0, A: 255}
-			} else if newData[i.Row][i.Col] == "X" {
-				o.(*canvas.Text).Color = color.RGBA{R: 0, G: 255, B: 0, A: 255}
-			} else if _, err := strconv.Atoi(newData[i.Row][i.Col]); err == nil {
-				o.(*canvas.Text).Color = color.RGBA{R: 255, G: 255, B: 0, A: 255}
+	newDetailInfo := widget.NewTable(
+		func() (int, int) {
+			if len(newData) == 0 {
+				return 0, 0
+			} else {
+				return len(newData), len(newData[0])
 			}
-		}
-	}
-	gDetailInfo.SetColumnWidth(0, 100)
-	gDetailInfo.SetColumnWidth(1, 100)
+		},
+		func() fyne.CanvasObject {
+			o := canvas.NewText("template", color.White)
+			objectsToHide = append(objectsToHide, o)
+			return o
+		},
+		func(i widget.TableCellID, o fyne.CanvasObject) {
+			o.(*canvas.Text).Text = newData[i.Row][i.Col]
+			o.(*canvas.Text).Alignment = fyne.TextAlignCenter
+			if i.Row == 0 {
+				o.(*canvas.Text).TextStyle = fyne.TextStyle{Bold: true}
+			} else {
+				if newData[i.Row][i.Col] == "O" {
+					o.(*canvas.Text).Color = color.RGBA{R: 255, G: 0, B: 0, A: 255}
+				} else if newData[i.Row][i.Col] == "X" {
+					o.(*canvas.Text).Color = color.RGBA{R: 0, G: 255, B: 0, A: 255}
+				} else if _, err := strconv.Atoi(newData[i.Row][i.Col]); err == nil {
+					o.(*canvas.Text).Color = color.RGBA{R: 255, G: 255, B: 0, A: 255}
+				}
+			}
+		},
+	)
+	newDetailInfo.SetColumnWidth(0, 100)
+	newDetailInfo.SetColumnWidth(1, 100)
 
 	for i := 0; i < len(newData); i++ {
-		gDetailInfo.SetRowHeight(i, 30)
+		newDetailInfo.SetRowHeight(i, 30)
 	}
-	gDetailInfo.Refresh()
+
+	mainContainer := createMainContainer(subContainer, list, newDetailInfo)
+	w.SetContent(mainContainer)
 }
 
 func main() {
@@ -95,6 +98,7 @@ func main() {
 
 	// Create a new window with the title "Go Eye".
 	w := a.NewWindow("Go Eye")
+	gWindow = w
 
 	// Initialize a data binding for the player name.
 	playerName := binding.NewString()
@@ -107,10 +111,11 @@ func main() {
 	playerEntry := createPlayerEntry(playerName)
 	searchButton := createSearchButton(playerName)
 	resultList, detailInfo := createResultWidgets()
-	gDetailInfo = detailInfo
+	gResultList = resultList
 
 	// Create sub-container for player entry, search button, and clipboard watcher switch.
 	subContainer := createInputContainer(playerEntry, searchButton)
+	gSubContainer = subContainer
 
 	// Create the main container with a horizontal split for result list and detail label.
 	mainContainer := createMainContainer(subContainer, resultList, detailInfo)
@@ -124,7 +129,9 @@ func main() {
 	w.ShowAndRun()
 }
 
-var gDetailInfo *widget.Table
+var gWindow fyne.Window
+var gSubContainer *fyne.Container
+var gResultList *widget.List
 
 // createPlayerEntry creates a widget for player name entry and binds it to the provided data binding.
 func createPlayerEntry(playerName binding.String) *widget.Entry {
@@ -347,7 +354,8 @@ func createResultWidgets() (*widget.List, *widget.Table) {
 			newData = append(newData, line)
 		}
 
-		UpdateDetailInfo(newData)
+		fmt.Println(newData)
+		UpdateDetailInfo(newData, gWindow, gSubContainer, gResultList)
 		isWorking = false
 	}
 
