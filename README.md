@@ -1,5 +1,5 @@
 # go-eye
-The EVE Online pilot analysis tool is designed for PVP users.
+The EVE Online pilot analysis tool designed for PVP users.
 
 
 ![appearance](./appearance.png)
